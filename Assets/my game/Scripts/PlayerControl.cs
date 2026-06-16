@@ -106,7 +106,7 @@ public class PlayerControl : MonoBehaviour
 
     public void Jump()
     {
-        if (IsGrounded)
+        if (IsGrounded && verticalVelocity <= 0f)
         {
             verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
         }
@@ -162,6 +162,12 @@ public class PlayerControl : MonoBehaviour
 
     private void CheckGrounded()
     {
+        if (controller != null)
+        {
+            IsGrounded = controller.isGrounded;
+            return;
+        }
+
         Vector3 spherePosition = transform.position + Vector3.up * groundedOffset;
         IsGrounded = Physics.CheckSphere(spherePosition, groundedRadius, groundLayers, QueryTriggerInteraction.Ignore);
     }
