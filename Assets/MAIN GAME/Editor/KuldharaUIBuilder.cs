@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
 using TMPro;
 using UnityEditor;
 using UnityEditor.Events;
@@ -7,13 +6,22 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-// Rebuilds the whole game UI (_Gameplay/GameUI) from the Kuldhara sprite sheet and wires GameManager / MapUI / SettingsUI.
-// Many sheet sprites have mockup text baked in; Cover() paints a sampled colour patch over it before our own text goes on top.
+// Rebuilds the whole game UI (_Gameplay/GameUI) from Layer Lab's white sprites, tinted to a Kuldhara sandstone palette,
+// and wires GameManager / MapUI / SettingsUI. Layout groups position stacked content; Check() reports any overlap left.
 public static class KuldharaUIBuilder
 {
-    const string SP = "Assets/MAIN GAME/UI/Kuldhara/Sprites/";
-    static readonly Color Gold = new Color(1f, .84f, .52f), Ink = new Color(.24f, .14f, .07f);
-    static readonly Dictionary<string, Texture2D> raw = new Dictionary<string, Texture2D>();
+    const string LL = "Assets/Layer Lab/GUI Pro-CasualGame/ResourcesData/";
+    const string SP = LL + "Sprites/Components/";
+
+    const string SprButton = "Button/Button01_195_White", SprCard = "Frame/BasicFrame_Round20", SprSquare = "Button/Button_Square01_White",
+        SprPopup = "Popup/Popoup01~03_White_Bg", SprPopupTop = "Popup/Popoup01~03_White_Bg_TopBasic", SprCircle = "Button/Button_Circle128_White",
+        SprTrack = "Slider/Slider_Basic03_Bg", SprFill = "Slider/Slider_Basic03_Fill_White";
+
+    static readonly Color Parchment = Hex("F4E4C1"), Sand = Hex("DDBE8A"), SandBtn = Hex("FFD99A"), Terracotta = Hex("A8481F"), Maroon = Hex("6B2A1C"),
+        Gold = Hex("F2B84B"), Ink = Hex("3B2314"), Cream = Hex("FFF3DA"), Blood = Hex("B3261E");
+    static readonly Color Dusk = new Color(.28f, .14f, .07f, .5f);
+
+    static Color Hex(string h) { ColorUtility.TryParseHtmlString("#" + h, out var c); return c; }
 
     [MenuItem("Tools/Kuldhara/Build UI")]
     public static void Build()
@@ -22,7 +30,6 @@ public static class KuldharaUIBuilder
         var gm = gp.GetComponent<GameManager>();
         var old = gp.transform.Find("GameUI");
         if (old) Object.DestroyImmediate(old.gameObject);
-        EnsureHelperSprites();
 
         var root = new GameObject("GameUI", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         root.transform.SetParent(gp.transform);
@@ -35,132 +42,138 @@ public static class KuldharaUIBuilder
         scaler.matchWidthOrHeight = .5f;
         var R = (RectTransform)root.transform;
 
-        // ---------- HUD ----------
-        var hud = Full("HudPanel", R, 0);
-        var portrait = Img("Portrait", hud, "HUD_Portrait", new Vector2(0, 1), new Vector2(110, -110), new Vector2(170, 165));
-        var stBack = Img("StaminaBack", hud, "Bar_Stamina", new Vector2(0, 1), new Vector2(390, -110), new Vector2(380, 60));
-        stBack.color = new Color(.35f, .3f, .3f);
-        var stFill = Img("StaminaFill", stBack.rectTransform, "Bar_Stamina", new Vector2(.5f, .5f), Vector2.zero, new Vector2(380, 60));
-        stFill.type = Image.Type.Filled; stFill.fillMethod = Image.FillMethod.Horizontal; stFill.fillOrigin = 0;
+        // ---------- HUD: quest card top-left, toast top-centre, minimap + buttons top-right ----------
+        var hud = Backdrop("HudPanel", R, Color.clear);
+        var quest = Img("QuestCard", hud, SprCard, Parchment);
+        Place(quest.rectTransform, new Vector2(0, 1), new Vector2(40, -40), new Vector2(470, 176));
+        var questTitle = Txt("Title", quest.rectTransform, "The Cursed Relics", 34, Terracotta, TextAlignmentOptions.Left);
+        Stretch(questTitle.rectTransform, 24, 116, 24, 12);
+        var questBody = Txt("Body", quest.rectTransform, "Relics found: 0 / 5", 26, Ink, TextAlignmentOptions.Left);
+        Stretch(questBody.rectTransform, 24, 70, 24, 62);
+        var track = Img("StaminaTrack", quest.rectTransform, SprTrack, Maroon);
+        Stretch(track.rectTransform, 24, 22, 24, 124);
+        track.gameObject.AddComponent<Mask>(); // clips the square-ended fill to the track's rounded corners
+        var stFill = Img("StaminaFill", track.rectTransform, "Slider/Slider_Handle_Fill", Gold);
+        Stretch(stFill.rectTransform, 0, 0, 0, 0);
+        stFill.preserveAspect = false; stFill.type = Image.Type.Filled; stFill.fillMethod = Image.FillMethod.Horizontal; stFill.fillOrigin = 0;
 
-        var mmMask = Img("MinimapMask", hud, "UI_Circle", new Vector2(1, 1), new Vector2(-150, -150), new Vector2(225, 225));
-        mmMask.gameObject.AddComponent<Mask>().showMaskGraphic = false;
-        var mm = new GameObject("MinimapMap", typeof(RectTransform), typeof(RawImage)).GetComponent<RawImage>();
-        Place(mm.rectTransform, mmMask.rectTransform, new Vector2(.5f, .5f), Vector2.zero, new Vector2(225, 225));
-        mm.texture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/MAIN GAME/UI/Kuldhara/MapBake.png");
-        mm.raycastTarget = false;
-        Img("MinimapFrame", hud, "HUD_MinimapRing", new Vector2(1, 1), new Vector2(-150, -150), new Vector2(290, 300));
-        var mmArrow = Arrow("MinimapArrow", hud, new Vector2(1, 1), new Vector2(-150, -150), 42);
-
-        var quest = Img("QuestTracker", hud, "Notify_QuestUpdated", new Vector2(1, 1), new Vector2(-260, -350), new Vector2(460, 128));
-        Cover(quest, "Notify_QuestUpdated", .27f, .14f, .97f, .86f, .5f, .5f);
-        var questTitle = Txt("Title", quest.rectTransform, "The Cursed Relics", 30, Gold, new Vector2(.28f, .5f), new Vector2(.97f, .9f), TextAlignmentOptions.Left);
-        var questBody = Txt("Body", quest.rectTransform, "Relics found: 0 / 5", 24, Color.white, new Vector2(.28f, .12f), new Vector2(.97f, .52f), TextAlignmentOptions.Left);
-
-        var toast = Img("Toast", hud, "Notify_ItemCollected", new Vector2(.5f, 1), new Vector2(0, -90), new Vector2(580, 160));
-        Cover(toast, "Notify_ItemCollected", .25f, .14f, .97f, .86f, .5f, .5f);
-        var toastText = Txt("Text", toast.rectTransform, "", 28, Color.white, new Vector2(.25f, .1f), new Vector2(.96f, .9f), TextAlignmentOptions.Left);
+        var toast = Img("Toast", hud, SprCard, Maroon);
+        Place(toast.rectTransform, new Vector2(.5f, 1), new Vector2(0, -40), new Vector2(560, 100));
+        var toastText = Txt("Text", toast.rectTransform, "", 28, Cream, TextAlignmentOptions.Center);
+        Stretch(toastText.rectTransform, 24, 10, 24, 10);
         toast.gameObject.SetActive(false);
 
-        // ---------- Overlay screens (built before HUD buttons so the buttons can target them) ----------
-        var pause = Backdrop("PausePanel", R, .7f);
-        Img("BannerL", pause, "Banner_Red", new Vector2(.5f, .5f), new Vector2(-430, 60), new Vector2(230, 360));
-        Img("BannerR", pause, "Banner_Red", new Vector2(.5f, .5f), new Vector2(430, 60), new Vector2(230, 360));
-        Txt("Title", pause, "Game Paused", 72, Gold, new Vector2(.3f, .78f), new Vector2(.7f, .92f), TextAlignmentOptions.Center);
+        var mmPlate = Img("Minimap", hud, SprCard, Parchment);
+        Place(mmPlate.rectTransform, new Vector2(1, 1), new Vector2(-40, -40), new Vector2(250, 250));
+        var mmMask = Img("MinimapMask", mmPlate.rectTransform, SprCard, Color.white);
+        Stretch(mmMask.rectTransform, 10, 10, 10, 10);
+        mmMask.gameObject.AddComponent<Mask>().showMaskGraphic = false;
+        var mapTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/MAIN GAME/UI/Kuldhara/MapBake.png");
+        var mm = Raw("MinimapMap", mmMask.rectTransform, mapTex);
+        Stretch(mm.rectTransform, 0, 0, 0, 0);
+        var mmArrow = Arrow("MinimapArrow", mmMask.rectTransform, 40);
 
-        var confirm = Backdrop("ConfirmPanel", R, .75f);
-        var alert = Img("Popup", confirm, "Popup_Alert", new Vector2(.5f, .5f), Vector2.zero, new Vector2(640, 480));
-        var yes = HotSpot("Btn_Yes", alert.rectTransform, .06f, .07f, .5f, .3f);
-        var no = HotSpot("Btn_No", alert.rectTransform, .5f, .07f, .94f, .3f);
+        var hudGrid = Rect("HudButtons", hud);
+        Place(hudGrid, new Vector2(1, 1), new Vector2(-40, -302), new Vector2(250, 212));
+        var grid = hudGrid.gameObject.AddComponent<GridLayoutGroup>();
+        grid.cellSize = new Vector2(119, 100); grid.spacing = new Vector2(12, 12);
+        var hPause = HudBtn("Btn_Pause", hudGrid, "Pictoicon_Control_Pause", "Pause");
+        var hMap = HudBtn("Btn_Map", hudGrid, "Pictoicon_Map_0", "Map");
+        var hJournal = HudBtn("Btn_Journal", hudGrid, "Pictoicon_Book_0", "Journal");
+        var hInv = HudBtn("Btn_Inventory", hudGrid, "Pictoicon_Bag", "Relics");
 
-        var settings = Backdrop("SettingsPanel", R, .75f);
-        var sp = Img("Panel", settings, "Panel_Quest", new Vector2(.5f, .5f), Vector2.zero, new Vector2(780, 830));
-        Cover(sp, "Panel_Quest", .07f, .1f, .93f, .8f, .5f, .45f);
-        Cover(sp, "Panel_Quest", .3f, .84f, .78f, .97f, .62f, .9f);
-        Txt("Title", sp.rectTransform, "Settings", 44, Gold, new Vector2(.3f, .83f), new Vector2(.78f, .98f), TextAlignmentOptions.Center);
-        var qualityLabel = Row(sp.rectTransform, "Graphics", .66f);
-        var qPrev = IconBtn("Prev", sp.rectTransform, "Misc_Pointer", new Vector2(.56f, .66f), 56, 0);
-        var qNext = IconBtn("Next", sp.rectTransform, "Misc_Pointer", new Vector2(.9f, .66f), 56, 180);
-        Row(sp.rectTransform, "Shadows", .5f).text = "";
-        var shadows = MakeToggle(sp.rectTransform, new Vector2(.73f, .5f));
-        Row(sp.rectTransform, "Volume", .34f).text = "";
-        var volume = MakeSlider(sp.rectTransform, .34f, 0f, 1f);
-        Row(sp.rectTransform, "Look Speed", .18f).text = "";
-        var sens = MakeSlider(sp.rectTransform, .18f, .3f, 2.5f);
-        var sClose = IconBtn("Close", sp.rectTransform, "Icon_close", new Vector2(.95f, .95f), 80, 0);
+        // ---------- Overlay screens ----------
+        var pause = Backdrop("PausePanel", R, Dusk);
+        var pc = Stack(Panel(pause, new Vector2(600, 570), "Game Paused", Terracotta, Cream));
+        var pResume = TextBtn("Btn_Continue", pc, "Resume", Terracotta, Cream);
+        var pSettings = TextBtn("Btn_Settings", pc, "Settings", SandBtn, Ink);
+        var pRestart = TextBtn("Btn_NewJourney", pc, "Restart", SandBtn, Ink);
+        var pExit = TextBtn("Btn_Exit", pc, "Exit Game", SandBtn, Ink);
 
-        var inv = Backdrop("InventoryPanel", R, .75f);
-        var ip = Img("Panel", inv, "Panel_Inventory", new Vector2(.5f, .5f), Vector2.zero, new Vector2(790, 730));
+        var confirm = Backdrop("ConfirmPanel", R, Dusk);
+        var cc = Panel(confirm, new Vector2(680, 380), "Leave Kuldhara?", Maroon, Cream);
+        var cMsg = Txt("Message", cc, "The spirits will still be here when you return.", 30, Ink, TextAlignmentOptions.Center);
+        Stretch(cMsg.rectTransform, 0, 104, 0, 0);
+        var cBtns = Rect("Buttons", cc);
+        Stretch(cBtns, 0, 0, 0, 0);
+        cBtns.anchorMax = new Vector2(1, 0); cBtns.sizeDelta = new Vector2(0, 88); cBtns.pivot = new Vector2(.5f, 0);
+        var row = cBtns.gameObject.AddComponent<HorizontalLayoutGroup>();
+        row.spacing = 20; row.childForceExpandHeight = row.childControlWidth = row.childControlHeight = true;
+        var no = TextBtn("Btn_No", cBtns, "Stay", SandBtn, Ink);
+        var yes = TextBtn("Btn_Yes", cBtns, "Leave", Terracotta, Cream);
+
+        var settings = Backdrop("SettingsPanel", R, Dusk);
+        var sc = Stack(Panel(settings, new Vector2(820, 570), "Settings", Terracotta, Cream, out var sClose), 16);
+        var gfx = SettingRow(sc, "Graphics");
+        var qPrev = ArrowBtn("Prev", gfx, "Pictoicon_Arrow_Prev", 0);
+        var qNext = ArrowBtn("Next", gfx, "Pictoicon_Arrow_Next", 1);
+        var qualityLabel = Txt("Value", gfx, "", 30, Ink, TextAlignmentOptions.Center);
+        Stretch(qualityLabel.rectTransform, 72, 0, 72, 0);
+        var shadows = MakeToggle(SettingRow(sc, "Shadows"));
+        var volume = MakeSlider(SettingRow(sc, "Volume"), 0f, 1f);
+        var sens = MakeSlider(SettingRow(sc, "Look Speed"), .3f, 2.5f);
+
+        var inv = Backdrop("InventoryPanel", R, Dusk);
+        var ic = Panel(inv, new Vector2(860, 420), "Cursed Relics", Terracotta, Cream, out var iClose);
+        var slotRow = Rect("Slots", ic);
+        Stretch(slotRow, 0, 70, 0, 0);
+        var slotGrid = slotRow.gameObject.AddComponent<GridLayoutGroup>();
+        slotGrid.cellSize = new Vector2(140, 140); slotGrid.spacing = new Vector2(16, 0);
+        slotGrid.childAlignment = TextAnchor.MiddleCenter;
         var slots = new List<Image>();
-        for (int r = 0; r < 3; r++)
-            for (int c = 0; c < 4; c++)
-            {
-                // painted slot cells, measured from the sprite (normalised, bottom-left origin)
-                float[] xs = { .05f, .29f, .52f, .74f }, y0s = { .535f, .34f, .07f }, y1s = { .82f, .54f, .31f };
-                float x0 = xs[c], x1 = x0 + .21f, y0 = y0s[r], y1 = y1s[r];
-                var cell = new Vector2((x0 + x1) / 2f, (y0 + y1) / 2f);
-                if (r == 0) Cover(ip, "Panel_Inventory", x0 + .015f, y0 + .015f, x1 - .015f, y1 - .015f, .45f, .45f); // hide painted mockup items
-                var s = Img("Relic" + (slots.Count + 1), ip.rectTransform, "Misc_Seal", cell, Vector2.zero, new Vector2(100, 100));
-                slots.Add(s);
-            }
-        Cover(ip, "Panel_Inventory", .3f, .03f, .72f, .1f, .5f, .065f);
-        var relicCount = Txt("RelicCount", ip.rectTransform, "0 / 5", 30, Gold, new Vector2(.3f, .02f), new Vector2(.72f, .11f), TextAlignmentOptions.Center);
-        var iClose = HotSpot("Btn_Close", ip.rectTransform, .89f, .88f, .99f, .99f);
+        for (int i = 0; i < 5; i++)
+        {
+            var cell = Img("Slot" + (i + 1), slotRow, SprCard, Sand);
+            var relic = Img("Relic" + (i + 1), cell.rectTransform, Picto("Pictoicon_Rune"), Terracotta);
+            Stretch(relic.rectTransform, 28, 28, 28, 28);
+            slots.Add(relic);
+        }
+        var relicCount = Txt("RelicCount", ic, "0 / 5", 34, Terracotta, TextAlignmentOptions.Center);
+        Stretch(relicCount.rectTransform, 0, 0, 0, 0);
+        relicCount.rectTransform.anchorMax = new Vector2(1, 0); relicCount.rectTransform.pivot = new Vector2(.5f, 0); relicCount.rectTransform.sizeDelta = new Vector2(0, 56);
 
-        var map = Backdrop("MapPanel", R, .75f);
-        var mp = Img("Panel", map, "Panel_Map", new Vector2(.5f, .5f), Vector2.zero, new Vector2(1300, 870));
-        var mapImg = new GameObject("MapImage", typeof(RectTransform), typeof(RawImage)).GetComponent<RawImage>();
-        mapImg.transform.SetParent(mp.transform, false);
+        var map = Backdrop("MapPanel", R, Dusk);
+        var mc = Panel(map, new Vector2(800, 880), "Map of Kuldhara", Terracotta, Cream, out var mClose);
+        var mapImg = Raw("MapImage", mc, mapTex);
         var mr = mapImg.rectTransform;
-        // square map area centred in the frame's parchment
-        mr.anchorMin = mr.anchorMax = new Vector2(.47f, .47f); mr.sizeDelta = new Vector2(690, 690); mr.anchoredPosition = Vector2.zero;
-        mapImg.texture = mm.texture;
-        var mPlayer = Arrow("PlayerMarker", mr, new Vector2(.5f, .5f), Vector2.zero, 44);
+        Place(mr, new Vector2(.5f, .5f), Vector2.zero, new Vector2(720, 720));
+        var mPlayer = Arrow("PlayerMarker", mr, 44);
         var targets = new List<Transform>(); var markers = new List<RectTransform>();
-        foreach (Transform t in gp.transform.Find("Relics")) { targets.Add(t); markers.Add(Img("Marker_" + t.name, mr, "Icon_pin", new Vector2(.5f, .5f), Vector2.zero, new Vector2(46, 46)).rectTransform); }
-        var shrine = gp.transform.Find("Shrine_Goal");
-        targets.Add(shrine); markers.Add(Img("Marker_Shrine", mr, "Icon_crown", new Vector2(.5f, .5f), Vector2.zero, new Vector2(54, 54)).rectTransform);
-        var mClose = IconBtn("Close", mp.rectTransform, "Icon_close", new Vector2(.97f, .95f), 90, 0);
+        foreach (Transform t in gp.transform.Find("Relics")) { targets.Add(t); markers.Add(Marker("Marker_" + t.name, mr, "Pictoicon_Mappin", Blood, 44)); }
+        targets.Add(gp.transform.Find("Shrine_Goal")); markers.Add(Marker("Marker_Shrine", mr, "Pictoicon_Home_0", Gold, 52));
 
-        var journal = Backdrop("JournalPanel", R, .75f);
-        var jp = Img("Panel", journal, "Panel_Journal", new Vector2(.5f, .5f), Vector2.zero, new Vector2(1220, 930));
-        Cover(jp, "Panel_Journal", .53f, .1f, .9f, .82f, .72f, .5f);
-        var journalText = Txt("Text", jp.rectTransform, "", 26, Ink, new Vector2(.555f, .1f), new Vector2(.9f, .76f), TextAlignmentOptions.TopLeft);
-        var jClose = IconBtn("Close", jp.rectTransform, "Icon_close", new Vector2(.96f, .93f), 90, 0);
+        var journal = Backdrop("JournalPanel", R, Dusk);
+        var jc = Panel(journal, new Vector2(900, 800), "Journal", Terracotta, Cream, out var jClose);
+        var journalText = Txt("Text", jc, "", 30, Ink, TextAlignmentOptions.TopLeft);
+        Stretch(journalText.rectTransform, 8, 0, 8, 0);
 
         // ---------- Main menu / win / lose ----------
-        var menu = Backdrop("MenuPanel", R, .45f);
-        Img("Logo", menu, "Logo", new Vector2(.3f, .5f), new Vector2(0, 230), new Vector2(760, 530));
-        var bNew = ImgBtn("Btn_NewJourney", menu, "Btn_NewJourney", new Vector2(.3f, .5f), new Vector2(0, -90));
-        var bExplore = ImgBtn("Btn_Explore", menu, "Btn_Explore", new Vector2(.3f, .5f), new Vector2(0, -195));
-        var bSettings = ImgBtn("Btn_Settings", menu, "Btn_Settings", new Vector2(.3f, .5f), new Vector2(0, -300));
-        var bExit = ImgBtn("Btn_Exit", menu, "Btn_Exit", new Vector2(.3f, .5f), new Vector2(0, -405));
+        var menu = Backdrop("MenuPanel", R, new Color(Dusk.r, Dusk.g, Dusk.b, .35f));
+        var menuCard = Img("Card", menu, SprPopup, Parchment);
+        Place(menuCard.rectTransform, new Vector2(.28f, .5f), Vector2.zero, new Vector2(620, 660));
+        menuCard.rectTransform.pivot = new Vector2(.5f, .5f);
+        var mList = Rect("Content", menuCard.rectTransform);
+        Stretch(mList, 40, 40, 40, 36);
+        Stack(mList);
+        Le(Txt("Title", mList, "KULDHARA", 92, Terracotta, TextAlignmentOptions.Center).gameObject, 110);
+        Le(Txt("Subtitle", mList, "The Cursed Village of the Thar", 30, Ink, TextAlignmentOptions.Center).gameObject, 56);
+        var bNew = TextBtn("Btn_NewJourney", mList, "New Journey", Terracotta, Cream);
+        var bExplore = TextBtn("Btn_Explore", mList, "Explore", SandBtn, Ink);
+        var bSettings = TextBtn("Btn_Settings", mList, "Settings", SandBtn, Ink);
+        var bExit = TextBtn("Btn_Exit", mList, "Exit Game", SandBtn, Ink);
 
-        var pResume = ImgBtn("Btn_Continue", pause, "Btn_Continue", new Vector2(.5f, .5f), new Vector2(0, 150));
-        var pSettings = ImgBtn("Btn_Settings", pause, "Btn_Settings", new Vector2(.5f, .5f), new Vector2(0, 45));
-        var pRestart = ImgBtn("Btn_NewJourney", pause, "Btn_NewJourney", new Vector2(.5f, .5f), new Vector2(0, -60));
-        var pExit = ImgBtn("Btn_Exit", pause, "Btn_Exit", new Vector2(.5f, .5f), new Vector2(0, -165));
+        var lose = Backdrop("LosePanel", R, Dusk);
+        var lc = Stack(Panel(lose, new Vector2(720, 570), "Caught", Blood, Cream));
+        Le(Txt("Sub", lc, "The spirit of Kuldhara claims another soul...", 30, Ink, TextAlignmentOptions.Center).gameObject, 80);
+        var lRetry = TextBtn("Btn_Continue", lc, "Retry from Last Relic", Terracotta, Cream);
+        var lRestart = TextBtn("Btn_NewJourney", lc, "Restart", SandBtn, Ink);
+        var lExit = TextBtn("Btn_Exit", lc, "Exit Game", SandBtn, Ink);
 
-        var lose = Backdrop("LosePanel", R, .8f);
-        Txt("Title", lose, "CAUGHT", 110, new Color(.9f, .2f, .15f), new Vector2(.2f, .68f), new Vector2(.8f, .88f), TextAlignmentOptions.Center);
-        Txt("Sub", lose, "The spirit of Kuldhara claims another soul...", 36, Gold, new Vector2(.2f, .58f), new Vector2(.8f, .68f), TextAlignmentOptions.Center);
-        var lRetry = ImgBtn("Btn_Continue", lose, "Btn_Continue", new Vector2(.5f, .5f), new Vector2(0, -20));
-        var lRestart = ImgBtn("Btn_NewJourney", lose, "Btn_NewJourney", new Vector2(.5f, .5f), new Vector2(0, -125));
-        var lExit = ImgBtn("Btn_Exit", lose, "Btn_Exit", new Vector2(.5f, .5f), new Vector2(0, -230));
-
-        var win = Backdrop("WinPanel", R, .8f);
-        Img("BannerL", win, "Banner_Camel", new Vector2(.5f, .5f), new Vector2(-480, 40), new Vector2(230, 350));
-        Img("BannerR", win, "Banner_Camel", new Vector2(.5f, .5f), new Vector2(480, 40), new Vector2(230, 350));
-        Txt("Title", win, "CURSE BROKEN", 100, Gold, new Vector2(.2f, .68f), new Vector2(.8f, .88f), TextAlignmentOptions.Center);
-        Txt("Sub", win, "Every relic rests at the shrine. Kuldhara sleeps at last.", 36, Color.white, new Vector2(.2f, .58f), new Vector2(.8f, .68f), TextAlignmentOptions.Center);
-        var wRestart = ImgBtn("Btn_NewJourney", win, "Btn_NewJourney", new Vector2(.5f, .5f), new Vector2(0, -40));
-        var wExit = ImgBtn("Btn_Exit", win, "Btn_Exit", new Vector2(.5f, .5f), new Vector2(0, -145));
-
-        // HUD icon buttons (left of minimap)
-        var hPause = IconBtn("Btn_Pause", hud, "Icon_pause", new Vector2(1, 1), 88, 0, new Vector2(-340, -70));
-        var hMap = IconBtn("Btn_Map", hud, "Icon_pin", new Vector2(1, 1), 88, 0, new Vector2(-340, -165));
-        var hJournal = IconBtn("Btn_Journal", hud, "Icon_book", new Vector2(1, 1), 88, 0, new Vector2(-435, -70));
-        var hInv = IconBtn("Btn_Inventory", hud, "Misc_Chest", new Vector2(1, 1), 88, 0, new Vector2(-435, -165));
+        var win = Backdrop("WinPanel", R, Dusk);
+        var wc = Stack(Panel(win, new Vector2(720, 470), "Curse Broken", Gold, Ink));
+        Le(Txt("Sub", wc, "Every relic rests at the haveli. Kuldhara sleeps at last.", 30, Ink, TextAlignmentOptions.Center).gameObject, 80);
+        var wRestart = TextBtn("Btn_NewJourney", wc, "Play Again", Terracotta, Cream);
+        var wExit = TextBtn("Btn_Exit", wc, "Exit Game", SandBtn, Ink);
 
         // ---------- Wiring ----------
         On(bNew, gm.Play); On(bExplore, gm.Explore); On(bExit, gm.AskQuit);
@@ -183,10 +196,7 @@ public static class KuldharaUIBuilder
         Set(so, "questTitle", questTitle); Set(so, "questBody", questBody); Set(so, "staminaFill", stFill);
         Set(so, "toast", toast.gameObject); Set(so, "toastText", toastText);
         Set(so, "relicCountText", relicCount); Set(so, "journalText", journalText);
-        var slotsProp = so.FindProperty("relicSlots");
-        slotsProp.arraySize = 5;
-        for (int i = 0; i < 5; i++) slotsProp.GetArrayElementAtIndex(i).objectReferenceValue = slots[i];
-        for (int i = 5; i < slots.Count; i++) Object.DestroyImmediate(slots[i].gameObject); // only 5 relics
+        SetArray(so, "relicSlots", slots.ToArray());
         so.ApplyModifiedPropertiesWithoutUndo();
 
         var player = Object.FindObjectOfType<PlayerController>();
@@ -206,195 +216,332 @@ public static class KuldharaUIBuilder
 
         foreach (var p in new[] { hud, pause, confirm, settings, inv, map, journal, lose, win }) p.gameObject.SetActive(false);
         UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gp.scene);
-        Debug.Log("Kuldhara UI built.");
+        Debug.Log("Kuldhara UI built. Layout problems: " + Check());
+    }
+
+    // ---------- Self-check ----------
+    // Every text and control in a screen must not intersect another one, and text must fit its rect. Parent/child pairs are allowed.
+    [MenuItem("Tools/Kuldhara/Check UI Layout")]
+    public static int Check()
+    {
+        int problems = 0;
+        var ui = GameObject.Find("_Gameplay").transform.Find("GameUI");
+        foreach (Transform screen in ui)
+        {
+            var toast = screen.Find("Toast");
+            bool was = screen.gameObject.activeSelf, toastWas = toast && toast.gameObject.activeSelf;
+            screen.gameObject.SetActive(true);
+            if (toast) toast.gameObject.SetActive(true);
+            foreach (var g in screen.GetComponentsInChildren<LayoutGroup>()) LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)g.transform);
+
+            var items = new List<RectTransform>();
+            foreach (var t in screen.GetComponentsInChildren<TMP_Text>())
+            {
+                t.ForceMeshUpdate();
+                if (t.isTextOverflowing) { problems++; Debug.LogWarning("UI text overflow: " + screen.name + "/" + t.name, t); }
+                items.Add(t.rectTransform);
+            }
+            foreach (var s in screen.GetComponentsInChildren<Selectable>()) items.Add((RectTransform)s.transform);
+            if (screen.name == "HudPanel") foreach (Transform c in screen) items.Add((RectTransform)c); // HUD blocks sit side by side
+
+            for (int a = 0; a < items.Count; a++)
+                for (int b = a + 1; b < items.Count; b++)
+                {
+                    if (items[a].IsChildOf(items[b]) || items[b].IsChildOf(items[a])) continue;
+                    if (!World(items[a]).Overlaps(World(items[b]))) continue;
+                    problems++;
+                    Debug.LogWarning("UI overlap in " + screen.name + ": " + items[a].name + " / " + items[b].name, items[a]);
+                }
+
+            if (toast) toast.gameObject.SetActive(toastWas);
+            screen.gameObject.SetActive(was);
+        }
+        return problems;
+    }
+
+    static Rect World(RectTransform r)
+    {
+        var c = new Vector3[4];
+        r.GetWorldCorners(c);
+        return new Rect(c[0].x, c[0].y, c[2].x - c[0].x, c[2].y - c[0].y);
     }
 
     // ---------- Builders ----------
-    static Sprite Spr(string n) => AssetDatabase.LoadAssetAtPath<Sprite>(SP + n + ".png");
+    static string Picto(string n) => "Icon_PictoIcons/128/" + n;
 
-    static void Place(RectTransform r, RectTransform parent, Vector2 anchor, Vector2 pos, Vector2 size)
+    static Sprite Spr(string path)
     {
-        r.SetParent(parent, false);
-        r.anchorMin = r.anchorMax = anchor; r.anchoredPosition = pos; r.sizeDelta = size;
+        var s = AssetDatabase.LoadAssetAtPath<Sprite>(SP + path + (path.StartsWith("Icon_PictoIcons") ? ".Png" : ".png"));
+        if (!s) Debug.LogError("Missing UI sprite: " + path);
+        return s;
     }
 
-    static Image Img(string name, RectTransform parent, string sprite, Vector2 anchor, Vector2 pos, Vector2 size)
-    {
-        var img = new GameObject(name, typeof(RectTransform), typeof(Image)).GetComponent<Image>();
-        Place(img.rectTransform, parent, anchor, pos, size);
-        img.sprite = Spr(sprite);
-        img.raycastTarget = false;
-        // only plain frames slice; sprites with baked text must scale uniformly so Cover() rects line up
-        if (sprite.StartsWith("Slot_") || sprite == "UI_SoftRect") img.type = Image.Type.Sliced;
-        return img;
-    }
-
-    static RectTransform Full(string name, RectTransform parent, float dim)
+    static RectTransform Rect(string name, RectTransform parent)
     {
         var r = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
         r.SetParent(parent, false);
-        r.anchorMin = Vector2.zero; r.anchorMax = Vector2.one; r.offsetMin = r.offsetMax = Vector2.zero;
-        if (dim > 0) { var i = r.gameObject.AddComponent<Image>(); i.color = new Color(0, 0, 0, dim); }
         return r;
     }
 
-    static RectTransform Backdrop(string name, RectTransform parent, float dim) => Full(name, parent, dim);
+    // Pivot follows the anchor, so pos is the inset from that screen edge.
+    static void Place(RectTransform r, Vector2 anchor, Vector2 pos, Vector2 size)
+    {
+        r.anchorMin = r.anchorMax = r.pivot = anchor; r.anchoredPosition = pos; r.sizeDelta = size;
+    }
 
-    static TMP_Text Txt(string name, RectTransform parent, string text, float size, Color color, Vector2 min, Vector2 max, TextAlignmentOptions align)
+    static void Stretch(RectTransform r, float left, float bottom, float right, float top)
+    {
+        r.anchorMin = Vector2.zero; r.anchorMax = Vector2.one;
+        r.offsetMin = new Vector2(left, bottom); r.offsetMax = new Vector2(-right, -top);
+    }
+
+    static Image Img(string name, RectTransform parent, string sprite, Color color)
+    {
+        var img = new GameObject(name, typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+        img.rectTransform.SetParent(parent, false);
+        img.sprite = Spr(sprite);
+        img.color = color;
+        img.raycastTarget = false;
+        if (img.sprite && img.sprite.border != Vector4.zero) img.type = Image.Type.Sliced;
+        else img.preserveAspect = true;
+        return img;
+    }
+
+    static RawImage Raw(string name, RectTransform parent, Texture tex)
+    {
+        var raw = new GameObject(name, typeof(RectTransform), typeof(RawImage)).GetComponent<RawImage>();
+        raw.rectTransform.SetParent(parent, false);
+        raw.texture = tex;
+        raw.raycastTarget = false;
+        return raw;
+    }
+
+    // Full-screen layer; a non-clear colour also blocks clicks to what is behind it.
+    static RectTransform Backdrop(string name, RectTransform parent, Color color)
+    {
+        var r = Rect(name, parent);
+        Stretch(r, 0, 0, 0, 0);
+        if (color.a > 0) r.gameObject.AddComponent<Image>().color = color;
+        return r;
+    }
+
+    // Popup with title bar, returns the empty content area below the bar.
+    static RectTransform Panel(RectTransform backdrop, Vector2 size, string title, Color bar, Color titleColor) =>
+        Panel(backdrop, size, title, bar, titleColor, false, out _);
+
+    static RectTransform Panel(RectTransform backdrop, Vector2 size, string title, Color bar, Color titleColor, out Button close) =>
+        Panel(backdrop, size, title, bar, titleColor, true, out close);
+
+    static RectTransform Panel(RectTransform backdrop, Vector2 size, string title, Color bar, Color titleColor, bool closable, out Button close)
+    {
+        const float barH = 96;
+        var p = Img("Panel", backdrop, SprPopup, Parchment);
+        Place(p.rectTransform, new Vector2(.5f, .5f), Vector2.zero, size);
+        var top = Img("TitleBar", p.rectTransform, SprPopupTop, bar);
+        top.rectTransform.anchorMin = new Vector2(0, 1); top.rectTransform.anchorMax = Vector2.one; top.rectTransform.pivot = new Vector2(.5f, 1);
+        top.rectTransform.anchoredPosition = Vector2.zero; top.rectTransform.sizeDelta = new Vector2(-6, barH); // sprite is a few px wider than the popup body
+        var t = Txt("Title", top.rectTransform, title, 46, titleColor, TextAlignmentOptions.Center);
+        Stretch(t.rectTransform, 96, 8, 96, 8);
+
+        close = null;
+        if (closable)
+        {
+            var x = Img("Btn_Close", top.rectTransform, SprSquare, Parchment);
+            Place(x.rectTransform, new Vector2(1, .5f), new Vector2(-16, 0), new Vector2(68, 68));
+            x.pixelsPerUnitMultiplier = x.sprite.rect.height / 68f;
+            x.raycastTarget = true;
+            close = x.gameObject.AddComponent<Button>();
+            Tint(close);
+            var icon = Img("Icon", x.rectTransform, Picto("PictoIcon_Close"), Maroon);
+            Stretch(icon.rectTransform, 18, 20, 18, 16);
+        }
+
+        var content = Rect("Content", p.rectTransform);
+        Stretch(content, 36, 32, 36, barH + 24);
+        return content;
+    }
+
+    static RectTransform Stack(RectTransform r, float spacing = 14)
+    {
+        var v = r.gameObject.AddComponent<VerticalLayoutGroup>();
+        v.spacing = spacing;
+        v.childControlWidth = v.childControlHeight = v.childForceExpandWidth = true;
+        v.childForceExpandHeight = false;
+        v.childAlignment = TextAnchor.UpperCenter;
+        return r;
+    }
+
+    static void Le(GameObject go, float height)
+    {
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredHeight = le.minHeight = height;
+    }
+
+    static TMP_Text Txt(string name, RectTransform parent, string text, float size, Color color, TextAlignmentOptions align)
     {
         var t = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI)).GetComponent<TextMeshProUGUI>();
         t.rectTransform.SetParent(parent, false);
-        t.rectTransform.anchorMin = min; t.rectTransform.anchorMax = max; t.rectTransform.offsetMin = t.rectTransform.offsetMax = Vector2.zero;
+        t.font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(LL + "Fonts/LilitaOne-Regular SDF.asset");
         t.text = text; t.fontSize = size; t.color = color; t.alignment = align; t.raycastTarget = false;
-        t.enableAutoSizing = true; t.fontSizeMin = size * .5f; t.fontSizeMax = size;
-        if (color != Ink) { t.fontStyle = FontStyles.Bold; t.outlineWidth = .18f; t.outlineColor = new Color32(30, 15, 5, 255); }
+        t.enableAutoSizing = true; t.fontSizeMin = size * .6f; t.fontSizeMax = size;
         return t;
     }
 
-    static Button ImgBtn(string name, RectTransform parent, string sprite, Vector2 anchor, Vector2 pos)
+    static void Tint(Button b)
     {
-        var s = Spr(sprite);
-        float h = 96f, w = h * s.rect.width / s.rect.height;
-        var img = Img(name, parent, sprite, anchor, pos, new Vector2(w, h));
-        img.type = Image.Type.Simple; img.raycastTarget = true;
+        var c = b.colors;
+        c.highlightedColor = new Color(1f, .95f, .85f); c.pressedColor = new Color(.8f, .7f, .6f); c.selectedColor = Color.white;
+        b.colors = c;
+    }
+
+    // Layer Lab's main button; the multiplier shrinks its 195px-tall slices to the height we draw it at.
+    static Button TextBtn(string name, RectTransform parent, string label, Color color, Color textColor, float height = 88)
+    {
+        var img = Img(name, parent, SprButton, color);
+        img.pixelsPerUnitMultiplier = img.sprite.rect.height / height;
+        img.raycastTarget = true;
+        Le(img.gameObject, height);
         var b = img.gameObject.AddComponent<Button>();
-        var cb = b.colors; cb.highlightedColor = new Color(1f, .93f, .75f); cb.pressedColor = new Color(.75f, .65f, .5f); b.colors = cb;
+        Tint(b);
+        var t = Txt("Label", img.rectTransform, label, 36, textColor, TextAlignmentOptions.Center);
+        Stretch(t.rectTransform, 16, 12, 16, 6); // sprite has a darker lip along the bottom edge
         return b;
     }
 
-    static Button IconBtn(string name, RectTransform parent, string sprite, Vector2 anchor, float size, float rotZ, Vector2 pos = default)
+    static Button HudBtn(string name, RectTransform parent, string icon, string caption)
     {
-        var img = Img(name, parent, sprite, anchor, pos, new Vector2(size, size));
-        img.type = Image.Type.Simple; img.preserveAspect = true; img.raycastTarget = true;
-        img.rectTransform.localEulerAngles = new Vector3(0, 0, rotZ);
-        return img.gameObject.AddComponent<Button>();
+        var img = Img(name, parent, SprSquare, Parchment);
+        img.raycastTarget = true;
+        var b = img.gameObject.AddComponent<Button>();
+        Tint(b);
+        var i = Img("Icon", img.rectTransform, Picto(icon), Terracotta);
+        Stretch(i.rectTransform, 30, 44, 30, 10);
+        var t = Txt("Caption", img.rectTransform, caption, 22, Ink, TextAlignmentOptions.Center);
+        Stretch(t.rectTransform, 6, 12, 6, 60);
+        return b;
     }
 
-    // Invisible clickable area over a button that is painted into a sprite (normalised rect in parent).
-    static Button HotSpot(string name, RectTransform parent, float x0, float y0, float x1, float y1)
+    static Button ArrowBtn(string name, RectTransform parent, string icon, float side)
     {
-        var img = new GameObject(name, typeof(RectTransform), typeof(Image)).GetComponent<Image>();
-        var r = img.rectTransform; r.SetParent(parent, false);
-        r.anchorMin = new Vector2(x0, y0); r.anchorMax = new Vector2(x1, y1); r.offsetMin = r.offsetMax = Vector2.zero;
-        img.color = new Color(1, 1, 1, 0);
-        return img.gameObject.AddComponent<Button>();
+        var img = Img(name, parent, SprSquare, SandBtn);
+        Place(img.rectTransform, new Vector2(side, .5f), Vector2.zero, new Vector2(60, 60));
+        img.pixelsPerUnitMultiplier = img.sprite.rect.height / 60f;
+        img.raycastTarget = true;
+        var b = img.gameObject.AddComponent<Button>();
+        Tint(b);
+        var i = Img("Icon", img.rectTransform, Picto(icon), Terracotta);
+        Stretch(i.rectTransform, 14, 16, 14, 12);
+        return b;
     }
 
-    // Paints over baked mockup text with the sprite's own colour sampled at (sx, sy).
-    static void Cover(Image target, string sprite, float x0, float y0, float x1, float y1, float sx, float sy)
+    // Rotated by MapUI, so the pivot must stay centred.
+    static RectTransform Arrow(string name, RectTransform parent, float size)
     {
-        if (!raw.ContainsKey(sprite)) { var t = new Texture2D(2, 2); t.LoadImage(File.ReadAllBytes(SP + sprite + ".png")); raw[sprite] = t; }
-        var tex = raw[sprite];
-        // average a small patch for a cleaner colour
-        Color c = Color.clear; int n = 0;
-        for (int dy = -3; dy <= 3; dy++) for (int dx = -3; dx <= 3; dx++) { c += tex.GetPixel((int)(sx * tex.width) + dx * 2, (int)(sy * tex.height) + dy * 2); n++; }
-        c /= n; c.a = 1;
-        var img = new GameObject("Cover", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
-        var r = img.rectTransform; r.SetParent(target.rectTransform, false);
-        r.anchorMin = new Vector2(x0, y0); r.anchorMax = new Vector2(x1, y1); r.offsetMin = r.offsetMax = Vector2.zero;
-        img.sprite = Spr("UI_SoftRect"); img.type = Image.Type.Sliced; img.color = c; img.raycastTarget = false;
+        var a = Img(name, parent, Picto("Pictoicon_Arrow_Up"), Blood);
+        Place(a.rectTransform, new Vector2(.5f, .5f), Vector2.zero, new Vector2(size, size));
+        return a.rectTransform;
     }
 
-    static RectTransform Arrow(string name, RectTransform parent, Vector2 anchor, Vector2 pos, float size)
+    static RectTransform Marker(string name, RectTransform parent, string icon, Color color, float size)
     {
-        var pivot = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
-        Place(pivot, parent, anchor, pos, new Vector2(size, size));
-        var a = Img("Icon", pivot, "Misc_Pointer", new Vector2(.5f, .5f), Vector2.zero, new Vector2(size, size));
-        a.preserveAspect = true;
-        a.rectTransform.localEulerAngles = new Vector3(0, 0, -90); // sprite points left -> make it point up
-        return pivot;
+        var m = Img(name, parent, Picto(icon), color);
+        Place(m.rectTransform, new Vector2(.5f, .5f), Vector2.zero, new Vector2(size, size));
+        return m.rectTransform;
     }
 
-    static TMP_Text Row(RectTransform panel, string label, float y)
+    // One row of a settings list; returns the empty right-hand area for its control.
+    static RectTransform SettingRow(RectTransform list, string label)
     {
-        Txt("Label_" + label, panel, label, 34, Ink, new Vector2(.1f, y - .05f), new Vector2(.5f, y + .05f), TextAlignmentOptions.Left).fontStyle = FontStyles.Bold;
-        return Txt("Value_" + label, panel, "", 32, Ink, new Vector2(.6f, y - .05f), new Vector2(.86f, y + .05f), TextAlignmentOptions.Center);
+        var bg = Img("Row_" + label, list, SprCard, Sand);
+        Le(bg.gameObject, 84);
+        var t = Txt("Label", bg.rectTransform, label, 32, Ink, TextAlignmentOptions.Left);
+        Stretch(t.rectTransform, 28, 8, 0, 8);
+        t.rectTransform.anchorMax = new Vector2(.42f, 1);
+        var area = Rect("Control", bg.rectTransform);
+        area.anchorMin = new Vector2(.42f, 0); area.anchorMax = Vector2.one;
+        area.offsetMin = new Vector2(12, 12); area.offsetMax = new Vector2(-24, -12);
+        return area;
     }
 
-    static Toggle MakeToggle(RectTransform panel, Vector2 at)
+    static Toggle MakeToggle(RectTransform area)
     {
-        var bg = Img("Toggle_Shadows", panel, "Slot_Empty", at, Vector2.zero, new Vector2(80, 80));
+        var bg = Img("Toggle_Shadows", area, "UI_Etc/Toggle02_CheckBox_White_bg", Parchment);
+        Place(bg.rectTransform, new Vector2(1, .5f), Vector2.zero, new Vector2(60, 60));
         bg.raycastTarget = true;
-        var check = Img("Check", bg.rectTransform, "Misc_Seal", new Vector2(.5f, .5f), Vector2.zero, new Vector2(60, 60));
+        var check = Img("Check", bg.rectTransform, "UI_Etc/Toggle02_CheckBox_Icon_White", Terracotta);
+        Stretch(check.rectTransform, 10, 10, 10, 10);
         var t = bg.gameObject.AddComponent<Toggle>();
         t.targetGraphic = bg; t.graphic = check; t.isOn = true;
         return t;
     }
 
-    static Slider MakeSlider(RectTransform panel, float y, float min, float max)
+    static Slider MakeSlider(RectTransform area, float min, float max)
     {
-        var bg = Img("Slider", panel, "Bar_SmallSkull", new Vector2(.73f, y), Vector2.zero, new Vector2(330, 56));
-        bg.color = new Color(.45f, .4f, .4f);
-        var fillArea = new GameObject("Fill Area", typeof(RectTransform)).GetComponent<RectTransform>();
-        fillArea.SetParent(bg.rectTransform, false); fillArea.anchorMin = new Vector2(.2f, .3f); fillArea.anchorMax = new Vector2(.95f, .7f); fillArea.offsetMin = fillArea.offsetMax = Vector2.zero;
-        var fill = Img("Fill", fillArea, "UI_SoftRect", new Vector2(0, 0), Vector2.zero, Vector2.zero);
-        fill.rectTransform.anchorMax = new Vector2(1, 1); fill.color = new Color(1f, .75f, .25f);
-        var handleArea = new GameObject("Handle Area", typeof(RectTransform)).GetComponent<RectTransform>();
-        handleArea.SetParent(bg.rectTransform, false); handleArea.anchorMin = new Vector2(.2f, 0); handleArea.anchorMax = new Vector2(.95f, 1); handleArea.offsetMin = handleArea.offsetMax = Vector2.zero;
-        var handle = Img("Handle", handleArea, "Misc_Seal", new Vector2(0, .5f), Vector2.zero, new Vector2(56, 56));
+        const float inset = 24; // half the handle, so it stays inside the track at both ends
+        var root = Rect("Slider", area);
+        Stretch(root, 0, 0, 0, 0);
+        var track = Img("Track", root, SprTrack, Maroon);
+        track.rectTransform.anchorMin = new Vector2(0, .5f); track.rectTransform.anchorMax = new Vector2(1, .5f);
+        track.rectTransform.sizeDelta = new Vector2(0, 24);
+        track.raycastTarget = true;
+
+        var fillArea = Rect("Fill Area", root);
+        fillArea.anchorMin = new Vector2(0, .5f); fillArea.anchorMax = new Vector2(1, .5f); fillArea.sizeDelta = new Vector2(-inset * 2, 24);
+        var fill = Img("Fill", fillArea, SprFill, Gold);
+        fill.pixelsPerUnitMultiplier = fill.sprite.rect.height / 24f;
+        fill.rectTransform.sizeDelta = new Vector2(inset * 2, 0);
+
+        var handleArea = Rect("Handle Area", root);
+        Stretch(handleArea, inset, 0, inset, 0);
+        var handle = Img("Handle", handleArea, SprCircle, Terracotta);
+        handle.rectTransform.sizeDelta = new Vector2(inset * 2, inset * 2);
         handle.raycastTarget = true;
-        var s = bg.gameObject.AddComponent<Slider>();
+
+        var s = root.gameObject.AddComponent<Slider>();
         s.fillRect = fill.rectTransform; s.handleRect = handle.rectTransform; s.targetGraphic = handle;
         s.minValue = min; s.maxValue = max; s.value = 1f;
-        bg.raycastTarget = true;
         return s;
     }
 
+    // Mobile canvas references 640x360, so these numbers read 3x larger on a 1080p screen.
     static void RestyleMobile(Canvas mobile)
     {
         if (!mobile) return;
         foreach (var j in mobile.GetComponentsInChildren<MobileJoystick>(true))
         {
             var so = new SerializedObject(j);
-            var bgR = so.FindProperty("background").objectReferenceValue as RectTransform;
-            var hR = so.FindProperty("handle").objectReferenceValue as RectTransform;
-            if (bgR && bgR.GetComponent<Image>()) { bgR.GetComponent<Image>().sprite = Spr("Joystick_Base"); bgR.GetComponent<Image>().color = Color.white; }
-            if (hR && hR.GetComponent<Image>()) { hR.GetComponent<Image>().sprite = Spr("Joystick_Knob"); hR.GetComponent<Image>().color = Color.white; }
+            var bg = so.FindProperty("background").objectReferenceValue as RectTransform;
+            var knob = so.FindProperty("handle").objectReferenceValue as RectTransform;
+            Round(bg, new Color(Parchment.r, Parchment.g, Parchment.b, .55f));
+            Round(knob, Terracotta);
+            so.FindProperty("handleRange").floatValue = 25f; // keeps the knob on the 100-unit base
+            so.ApplyModifiedPropertiesWithoutUndo();
         }
-        foreach (var b in mobile.GetComponentsInChildren<MobileButton>(true))
-        {
-            var img = b.GetComponent<Image>(); if (!img) continue;
-            img.sprite = Spr(b.name.ToLower().Contains("sprint") ? "Action_Run" : "Action_Walk");
-            img.color = Color.white; img.preserveAspect = true;
-            foreach (var t in b.GetComponentsInChildren<TMP_Text>(true)) t.gameObject.SetActive(false);
-            foreach (var t in b.GetComponentsInChildren<Text>(true)) t.gameObject.SetActive(false);
-        }
+        // action buttons on a grid with a clear gap, right-bottom
+        ActionBtn(mobile, "Sprint Btn", "Pictoicon_Shoes", new Vector2(-50, 50));
+        ActionBtn(mobile, "Jump Btn", "Pictoicon_Arrow_Up", new Vector2(-125, 50));
+        ActionBtn(mobile, "Torch Btn", "Pictoicon_Bulb", new Vector2(-50, 125));
     }
 
-    // UI_Circle (minimap mask), UI_SoftRect (cover patches), HUD_MinimapRing (minimap frame with hollow centre).
-    static void EnsureHelperSprites()
+    static void Round(RectTransform r, Color color)
     {
-        bool made = false;
-        if (!File.Exists(SP + "UI_Circle.png")) { WriteTex("UI_Circle", 256, (x, y) => Mathf.Clamp01(127.5f - Vector2.Distance(new Vector2(x, y), new Vector2(127.5f, 127.5f)))); made = true; }
-        if (!File.Exists(SP + "UI_SoftRect.png")) { WriteTex("UI_SoftRect", 64, (x, y) => Mathf.Clamp01(Mathf.Min(Mathf.Min(x, 63 - x), Mathf.Min(y, 63 - y)) / 10f)); made = true; }
-        if (!File.Exists(SP + "HUD_MinimapRing.png"))
-        {
-            var t = new Texture2D(2, 2); t.LoadImage(File.ReadAllBytes(SP + "HUD_Minimap.png"));
-            var px = t.GetPixels32(); float cx = t.width / 2f, cy = t.height / 2f, rIn = Mathf.Min(t.width, t.height) * .39f;
-            for (int i = 0; i < px.Length; i++)
-            {
-                float d = Vector2.Distance(new Vector2(i % t.width, i / t.width), new Vector2(cx, cy));
-                px[i].a = (byte)Mathf.Min(px[i].a, 255 * Mathf.Clamp01(d - rIn));
-            }
-            t.SetPixels32(px); t.Apply(); File.WriteAllBytes(SP + "HUD_MinimapRing.png", t.EncodeToPNG()); made = true;
-        }
-        if (!made) return;
-        AssetDatabase.Refresh();
-        foreach (var n in new[] { "UI_Circle", "UI_SoftRect", "HUD_MinimapRing" })
-        {
-            var ti = (TextureImporter)AssetImporter.GetAtPath(SP + n + ".png");
-            ti.textureType = TextureImporterType.Sprite; ti.spriteImportMode = SpriteImportMode.Single;
-            ti.mipmapEnabled = false; ti.alphaIsTransparency = true;
-            if (n == "UI_SoftRect") ti.spriteBorder = new Vector4(12, 12, 12, 12);
-            ti.SaveAndReimport();
-        }
+        var img = r ? r.GetComponent<Image>() : null;
+        if (!img) return;
+        img.sprite = Spr(SprCircle); img.color = color; img.type = Image.Type.Simple; img.preserveAspect = true;
     }
 
-    static void WriteTex(string name, int size, System.Func<int, int, float> alpha)
+    static void ActionBtn(Canvas mobile, string name, string icon, Vector2 pos)
     {
-        var t = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        for (int y = 0; y < size; y++) for (int x = 0; x < size; x++) t.SetPixel(x, y, new Color(1, 1, 1, alpha(x, y)));
-        t.Apply(); File.WriteAllBytes(SP + name + ".png", t.EncodeToPNG());
+        var r = mobile.transform.Find(name) as RectTransform;
+        if (!r) { Debug.LogError("Missing mobile button: " + name); return; }
+        r.pivot = new Vector2(.5f, .5f); r.anchoredPosition = pos; r.sizeDelta = new Vector2(64, 64);
+        Round(r, Parchment);
+        var child = r.Find("Image")?.GetComponent<Image>();
+        if (!child) return;
+        child.sprite = Spr(Picto(icon)); child.color = Terracotta; child.preserveAspect = true;
+        child.rectTransform.anchorMin = Vector2.zero; child.rectTransform.anchorMax = Vector2.one;
+        child.rectTransform.offsetMin = child.rectTransform.offsetMax = Vector2.zero;
+        child.rectTransform.sizeDelta = new Vector2(-28, -28);
     }
 
     // ---------- Wiring helpers ----------

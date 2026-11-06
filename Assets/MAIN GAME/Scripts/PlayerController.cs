@@ -16,27 +16,27 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private RectTransform[] lookBlockers;
 
     [Header("Movement")]
-    [SerializeField] private float walkSpeed = 4.2f;
-    [SerializeField] private float sprintSpeed = 6.6f;
-    [SerializeField] private float acceleration = 18f;
-    [SerializeField] private float deceleration = 22f;
+    [SerializeField] private float walkSpeed = 2.6f;
+    [SerializeField] private float sprintSpeed = 4.8f;
+    [SerializeField] private float acceleration = 12f;
+    [SerializeField] private float deceleration = 16f;
     [SerializeField] private float airControl = 0.45f;
-    [SerializeField] private float jumpHeight = 1.25f;
-    [SerializeField] private float gravity = -6f;
-    [SerializeField] private float groundedStickForce = -2f;
-    [SerializeField] private float terminalFallSpeed = -55f;
-
-    [Header("Ground Check")]
-    [SerializeField] private LayerMask groundLayers = ~0;
-    [SerializeField] private float groundedOffset = -0.08f;
-    [SerializeField] private float groundedRadius = 0.35f;
+    [SerializeField] private float jumpHeight = 1.0f;
+    [SerializeField] private float gravity = -20f;
+    [SerializeField] private float groundedStickForce = -3f;
+    [SerializeField] private float terminalFallSpeed = -50f;
 
     [Header("Look")]
     [SerializeField] private float touchSensitivity = 0.12f;
     [SerializeField] private float mouseSensitivity = 0.08f;
-    [SerializeField] private float lookSmoothing = 22f;
+    [SerializeField] private float lookSmoothing = 30f;
     [SerializeField] private float minPitch = -80f;
     [SerializeField] private float maxPitch = 80f;
+
+    [Header("First Person")]
+    [SerializeField] private float eyeHeight = 1.6f;
+    [SerializeField] private float bobAmount = 0.02f;
+    [SerializeField] private float stepLength = 1.1f;
 
     [Header("Editor Testing")]
     [SerializeField] private bool keyboardAndMouse = true;
@@ -48,6 +48,9 @@ public class PlayerController : MonoBehaviour
     public float Stamina01 => stamina / maxStamina;
     public float LookSensitivityScale { get; set; } = 1f;
     public bool IsGrounded { get; private set; }
+    public float Speed01 => Mathf.InverseLerp(walkSpeed, sprintSpeed, planarVelocity.magnitude);
+    public bool IsMoving => bobWeight > 0.5f;
+    public int FootPlants => Mathf.FloorToInt(bobPhase / Mathf.PI - 0.75f); // ticks when the bob reaches its lowest point
     public Vector2 MoveInput { get; private set; }
 
     private CharacterController controller;
@@ -61,6 +64,8 @@ public class PlayerController : MonoBehaviour
     private Vector2 smoothLookDelta;
     private int activeLookTouchId = -1;
     private bool mouseLookStartedAwayFromUi;
+    private float bobPhase;
+    private float bobWeight;
 
     private void Reset()
     {
@@ -89,7 +94,6 @@ public class PlayerController : MonoBehaviour
     private void Update()
     {
         ReadMoveInput();
-        CheckGrounded();
         MovePlayer();
     }
 
@@ -97,6 +101,7 @@ public class PlayerController : MonoBehaviour
     {
         ReadLookInput();
         RotateView();
+        UpdateHeadBob();
     }
 
     public void SetMoveInput(Vector2 input)
@@ -170,12 +175,28 @@ public class PlayerController : MonoBehaviour
         Vector3 motion = planarVelocity;
         motion.y = verticalVelocity;
         controller.Move(motion * Time.deltaTime);
+        IsGrounded = controller.isGrounded;
+
+        // Walls eat speed immediately, so the player never keeps pushing or lurches when clearing a corner.
+        Vector3 actual = controller.velocity;
+        actual.y = 0f;
+        planarVelocity = Vector3.ClampMagnitude(actual, planarVelocity.magnitude);
     }
 
-    private void CheckGrounded()
+    // Phase follows distance walked, so step rhythm matches speed at any frame rate.
+    private void UpdateHeadBob()
     {
-        Vector3 spherePosition = transform.position + Vector3.up * groundedOffset;
-        IsGrounded = Physics.CheckSphere(spherePosition, groundedRadius, groundLayers, QueryTriggerInteraction.Ignore);
+        if (cameraRoot == null)
+        {
+            return;
+        }
+
+        float speed = planarVelocity.magnitude;
+        bobWeight = Mathf.MoveTowards(bobWeight, IsGrounded && speed > 0.2f ? 1f : 0f, 5f * Time.deltaTime);
+        bobPhase += speed / (stepLength * (1f + 0.45f * Speed01)) * Mathf.PI * Time.deltaTime; // sprinting lengthens the stride
+        float lift = Mathf.Sin(bobPhase * 2f) * bobAmount * bobWeight;
+        float sway = Mathf.Cos(bobPhase) * bobAmount * 0.5f * bobWeight;
+        cameraRoot.localPosition = new Vector3(sway, eyeHeight + lift, 0f);
     }
 
     private bool IsSprintHeld()
@@ -397,11 +418,5 @@ public class PlayerController : MonoBehaviour
     {
         angle %= 360f;
         return angle > 180f ? angle - 360f : angle;
-    }
-
-    private void OnDrawGizmosSelected()
-    {
-        Gizmos.color = IsGrounded ? Color.green : Color.red;
-        Gizmos.DrawWireSphere(transform.position + Vector3.up * groundedOffset, groundedRadius);
     }
 }

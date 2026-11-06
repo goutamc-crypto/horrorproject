@@ -64,6 +64,7 @@ public class GameManager : MonoBehaviour
         Show(hudPanel);
         SetPaused(false);
         RefreshUI();
+        if (!exploreMode) chaser.StartStalk(player.transform);
         Toast(exploreMode ? "Explore Kuldhara freely. Nothing hunts you... tonight." : "Find the " + total + " cursed relics. Don't let it catch you.");
     }
 
@@ -76,9 +77,11 @@ public class GameManager : MonoBehaviour
 
     public void OpenPanel(GameObject panel)
     {
-        overlayBack = overlay != null ? overlay : (menuPanel.activeSelf ? menuPanel : null);
+        var screen = menuPanel.activeSelf ? menuPanel : winPanel.activeSelf ? winPanel : losePanel.activeSelf ? losePanel : null;
+        overlayBack = overlay != null ? overlay : screen;
         if (overlay) overlay.SetActive(false);
-        if (menuPanel.activeSelf) menuPanel.SetActive(false);
+        if (screen) screen.SetActive(false);
+        hudPanel.SetActive(false); // Resume() brings it back; keeps HUD and toast from showing around the panel
         overlay = panel;
         panel.SetActive(true);
         SetPaused(true);
@@ -88,7 +91,7 @@ public class GameManager : MonoBehaviour
     {
         var back = overlayBack;
         CloseOverlay();
-        if (back == menuPanel) menuPanel.SetActive(true);
+        if (back == menuPanel || back == winPanel || back == losePanel) back.SetActive(true);
         else if (back != null) OpenPanel(back); // e.g. back to pause menu
         else Resume();
     }
@@ -108,7 +111,7 @@ public class GameManager : MonoBehaviour
         collected++;
         checkpoint = at;
         RefreshUI();
-        if (collected >= total) Toast("All relics found! Bring them to the Bone Shrine.");
+        if (collected >= total) Toast("All relics found! Bring them to the Haunted Haveli.");
         else Toast(exploreMode ? "Relic " + collected + "/" + total + " found." : "Relic " + collected + "/" + total + "... something woke up. RUN!");
         if (!exploreMode) chaser.StartChase(player.transform);
     }
@@ -116,7 +119,7 @@ public class GameManager : MonoBehaviour
     public void ReachShrine()
     {
         if (over) return;
-        if (collected < total) { Toast("The shrine needs " + (total - collected) + " more relic(s)."); return; }
+        if (collected < total) { Toast("The haveli needs " + (total - collected) + " more relic(s)."); return; }
         End(winPanel);
     }
 
@@ -146,14 +149,14 @@ public class GameManager : MonoBehaviour
     {
         bool done = collected >= total;
         questTitle.text = exploreMode && !done ? "Explore Kuldhara" : done ? "Break the Curse" : "The Cursed Relics";
-        questBody.text = done ? "Bring the relics to the Bone Shrine (north-west)." : "Relics found: " + collected + " / " + total;
+        questBody.text = done ? "Bring the relics to the Haunted Haveli (north)." : "Relics found: " + collected + " / " + total;
         for (int i = 0; i < relicSlots.Length; i++) relicSlots[i].enabled = i < collected;
         relicCountText.text = collected + " / " + total;
         journalText.text =
             "<b>The Curse of Kuldhara</b>\n\nThe villagers fled in a single night, leaving five cursed relics behind.\n\n" +
-            "Relics are hidden in the graveyard, the abandoned camp, the dead forest, the rock canyon and the old ruins.\n\n" +
+            "Relics are hidden at the cursed well, the abandoned shop, the ancient temple, the baori and the village square.\n\n" +
             "Each relic I take wakes the spirit. I must sprint to escape it.\n\n" +
-            "When all " + total + " are found, the Bone Shrine in the north-west can end the curse.\n\n" +
+            "When all " + total + " are found, the Haunted Haveli in the north can end the curse.\n\n" +
             "<b>Found: " + collected + " / " + total + "</b>";
     }
 
